@@ -24,6 +24,7 @@ class MainActivity : Activity() {
     private lateinit var urlView: TextView
     private lateinit var reportView: TextView
     private lateinit var scanBtn: Button
+    private lateinit var linkView: TextView
     private val server = ReportServer()
     private var report: String? = null
 
@@ -83,9 +84,24 @@ class MainActivity : Activity() {
             textSize = 22f
             setOnClickListener { save() }
         }
+        val uploadBtn = Button(this).apply {
+            text = "UPLOAD → GET LINK"
+            textSize = 22f
+            setOnClickListener { upload() }
+        }
         row.addView(scanBtn, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
+        row.addView(uploadBtn, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1.4f))
         row.addView(saveBtn, LinearLayout.LayoutParams(0, WRAP_CONTENT, 1f))
         root.addView(row)
+
+        linkView = TextView(this).apply {
+            textSize = 34f
+            typeface = Typeface.DEFAULT_BOLD
+            setTextColor(Color.parseColor("#4CE08A"))
+            setTextIsSelectable(true)
+            setPadding(0, pad / 2, 0, 0)
+        }
+        root.addView(linkView)
 
         status = TextView(this).apply {
             text = "Tap SCAN to start."
@@ -164,6 +180,50 @@ class MainActivity : Activity() {
             status.text = "Saved: $where"
         } catch (t: Throwable) {
             status.text = "Save failed ($t). Use the phone address instead."
+        }
+    }
+
+    /**
+     * Uploads the report to paste.rs (free, no account) and shows the short link
+     * in big text, so it can be typed into a phone. Uses the car's own LTE.
+     * If the full report is too big, it falls back to the summary part only.
+     */
+    private fun upload() {
+        val text = report ?: run { toast("Scan first."); return }
+        status.text = "Uploading…"
+        linkView.text = ""
+        thread {
+            val summary = text.substringBefore("==================== Device")
+            val result = runCatching { post(text) }
+                .recoverCatching { post(summary + "\n(full report too large; summary only)") }
+            runOnUiThread {
+                result.onSuccess { url ->
+                    linkView.text = url
+                    status.text = "Open this link on your phone, or send it to Claude:"
+                }.onFailure {
+                    status.text = "Upload failed: ${it.message}. Is the car online? Try again, or use the Brave method."
+                }
+            }
+        }
+    }
+
+    private fun post(body: String): String {
+        val conn = (java.net.URL("https://paste.rs/").openConnection() as java.net.HttpURLConnection).apply {
+            requestMethod = "POST"
+            doOutput = true
+            connectTimeout = 15000
+            readTimeout = 30000
+            setRequestProperty("Content-Type", "text/plain; charset=utf-8")
+        }
+        try {
+            conn.outputStream.use { it.write(body.toByteArray(Charsets.UTF_8)) }
+            val code = conn.responseCode
+            val reply = (if (code in 200..299) conn.inputStream else conn.errorStream)
+                ?.bufferedReader()?.readText()?.trim().orEmpty()
+            if (code !in 200..299 || !reply.startsWith("http")) throw IllegalStateException("HTTP $code $reply")
+            return reply
+        } finally {
+            conn.disconnect()
         }
     }
 

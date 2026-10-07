@@ -60,7 +60,19 @@ class Scanner(private val ctx: Context, private val progress: (String) -> Unit) 
         section("Settings keys") { settings() }
         section("SDK class probes") { classProbes() }
         line(); line("END OF REPORT")
-        return out.toString()
+
+        // Short summary first, so it fits on screen and in an upload.
+        val body = out.toString()
+        val keys = listOf("<<< LIGHT", "<<< VENDOR", "FOUND  ", "### ", "declares-permission",
+            "NOT available", "Properties visible", "Android:", "Model:", "Manufacturer:")
+        val summary = body.lines().filter { l -> keys.any { l.contains(it) } }
+            .distinct().take(300)
+        return buildString {
+            append("==================== SUMMARY ====================\n")
+            summary.forEach { append(it).append('\n') }
+            append('\n')
+            append(body)
+        }
     }
 
     private fun section(name: String, block: () -> Unit) {
